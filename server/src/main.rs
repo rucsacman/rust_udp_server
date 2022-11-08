@@ -1,155 +1,109 @@
 use std::{
-    borrow::BorrowMut,
+    // borrow::BorrowMut,
     collections::{HashMap, VecDeque},
     sync::{
-        atomic::{AtomicUsize, Ordering},
+        // atomic::{AtomicUsize, Ordering},
         Arc, RwLock,
     },
-    time::Duration,
+    // time::Duration,
     net::SocketAddr,
     error::Error
 };
 use tokio::{
-    io::{AsyncReadExt, AsyncWriteExt},
+    // io::{AsyncReadExt, AsyncWriteExt},
     net::{UdpSocket},
-    time::timeout,
+    // time::timeout,
 };
+
+// struct Client {
+//     socket: UdpSocket,
+//     to_send: Option<(usize, SocketAddr)>,
+// }
+
 #[tokio::main]
 async fn main(){
-    let client_object: HashMap<usize, VecDeque<String>> = HashMap::new();
-    let client_object_lock = Arc::new(RwLock::new(client_object));
+    let client_map: HashMap<SocketAddr, VecDeque<String>> = HashMap::new();
+    let client_map_lock = Arc::new(RwLock::new(client_map));
 
     let socket = UdpSocket::bind("127.0.0.1:7878").await.unwrap();
+    let mut socket_lock = Arc::new(socket);
+    
+    let mut buffer = [1; 500];
+    let mut is_new_client =false;
+    loop{
+        let mut c_socket_lock = Arc::clone(&socket_lock);
+        let c_client_map_lock = Arc::clone(&client_map_lock);
+        match socket_lock.recv_from(&mut buffer).await{
+            
+            Ok((size, addr)) =>{
+                let message = String::from_utf8_lossy(&mut buffer[..size]);
+                {
 
-    loop {
-        let mut buffer = [1; 500];
-        let mut _len = 0;
-        // let (size, addr) = socket.recv_from(&mut buffer).await.expect("ERROR");
-        
-        println!("Listening..");
-        match socket.recv_from(&mut buffer).await{
-            Ok(_) =>{
-                println!("Success");
+                    let mut map = c_client_map_lock.write().unwrap();
+                    is_new_client = map.contains_key(&addr);
+
+                    if !is_new_client {
+                        map.insert( addr, VecDeque::new() );
+                    }
+
+                    for (key, message_deque) in &mut *map {
+                        println!(
+                            "clinet: {}",
+                            key
+                        );
+                        if size > 3 {
+                            message_deque.push_back(message.to_string());
+                        } 
+                    }
+                }
+
+                if !is_new_client{
+                    println!("Connection Established");
+
+                    tokio::spawn(async move {
+                        handle_connection(&mut c_socket_lock.clone(), addr, &mut c_client_map_lock.clone()).await;
+                    });
+                }
             },
             Err(_)=>{
                 println!("Error",);
             }
         }
-        println!("Size:");
-
-        // match timeout(Duration::from_millis(50), socket.send_to(&mut buffer[..size], addr)).await {
-        //     Ok(result) => {
-        //         let result = match result {
-        //             Ok(bytes) => {
-        //                 println!("received bytes {}", bytes);
-        //                 _len = bytes
-        //             }
-        //             Err(e) => {
-        //                 println!("unable to read the data from the socket error: {}", e);
-        //                 _len = 0;
-        //             }
-        //         };
-        //         result
-        //     }
-        //     Err(_) => {
-        //         _len = 0;
-        //     }
-        // };
     }
+    
 }
 
 async fn handle_connection(
-    mut socket: UdpSocket,
-    // client_lock: &mut Arc<RwLock<HashMap<usize, VecDeque<String>>>>,
-) -> Result<(), std::io::Error> {
-    let client_id = get_id() - 1;
-    // {
-    //     let boradcast_map = &mut *client_lock.write().unwrap();
-    //     boradcast_map.insert(client_id, VecDeque::new());
-    //     println!("size: {}", boradcast_map.len());
-    // }
+    socket_lock: &mut Arc<UdpSocket>,
+    client_address: SocketAddr,
+    client_lock: &mut Arc<RwLock<HashMap<SocketAddr, VecDeque<String>>>>,
+){
 
+    let mut buffer = [1; 500];
+    let mut _len = 0;
+    println!("Listening: {}", client_address);
+    
     loop {
-        let mut buffer = [1; 500];
-        let mut _len = 0;
-        let (size, addr) = socket.recv_from(&mut buffer).await?;
-
-        match timeout(Duration::from_millis(50), socket.send_to(&mut buffer[..size], addr)).await {
-            Ok(result) => {
-                let result = match result {
-                    Ok(bytes) => {
-                        // println!("received bytes {}", bytes);
-                        _len = bytes
-                    }
-                    Err(e) => {
-                        println!("unable to read the data from the socket error: {}", e);
-                        _len = 0;
-                    }
-                };
-                result
+        let mut boradcast_vec = VecDeque::new();
+        // println!("client {}", client_address);
+        {
+            let client_map = &mut *client_lock.write().unwrap();
+            if client_map.len() != 0 {
+                boradcast_vec = client_map.get_mut(&client_address).unwrap().clone();
+                client_map.get_mut(&client_address).unwrap().clear();
             }
-            Err(_) => {
-                _len = 0;
+            else{
+                println!("Array Empty")
             }
-        };
+        }
+        
+        loop{
+            if boradcast_vec.len() == 0 {
+                break;
+            }
 
-        // let mut boradcast_vec = VecDeque::new();
-
-        // {
-        //     let client_map = &mut *client_lock.write().unwrap();
-        //     if _len > 3 {
-        //         let message = String::from_utf8_lossy(&mut buffer[.._len]);
-
-        //         for (key, message_deque) in &mut *client_map {
-        //             println!(
-        //                 "clinet: {} | Push back :  key: {}  value : {} ",
-        //                 client_id, key, message
-        //             );
-        //             message_deque.push_back(message.to_string());
-        //         }
-        //     }
-        //     boradcast_vec = client_map.get_mut(&client_id).unwrap().clone();
-        //     client_map.get_mut(&client_id).unwrap().clear();
-        // }
-
-        // let mut borrow_vec = boradcast_vec.borrow_mut();
-        // let mut message: String = String::new();
-
-        // loop {
-        //     if borrow_vec.len() == 0 {
-        //         break;
-        //     }
-
-        //     let value = borrow_vec.pop_front().unwrap();
-        //     message.push_str(&value);
-        // }
-
-        // if message.len() > 0 {
-        //     println!("clinet: {}  write message : {} ", client_id, message);
-            
-        //     match timeout(Duration::from_millis(50), socket.send(message.as_bytes())).await {
-        //         Ok(result) => {
-        //             let result = match result {
-        //                 Ok(bytes) => {
-        //                     let _ = socket.flush().await.unwrap();
-        //                     _len = bytes
-        //                 }
-        //                 Err(e) => {
-        //                     println!("unable to write the data from the socket error: {}", e);
-        //                     _len = 0;
-        //                 }
-        //             };
-        //             result
-        //         }
-        //         Err(_) => {
-        //             _len = 0;
-        //         }
-        //     };
-        // }
+            let message = boradcast_vec.pop_front().unwrap();
+            socket_lock.send_to(message.as_bytes(), client_address).await;
+        } 
     }
-}
-
-fn get_id() -> usize {
-    static COUNTER: AtomicUsize = AtomicUsize::new(1);
-    COUNTER.fetch_add(1, Ordering::Relaxed)
 }
